@@ -13,6 +13,7 @@ export interface Note {
   id: string
   user_id: string
   title: string
+  content: string
   blocks: Block[]
   created_at: string
   updated_at: string
@@ -44,15 +45,27 @@ export const useStore = create<NotesStore>((set, get) => ({
     if (!user) return
 
     set({ isLoading: true })
-    const { data: notes, error } = await supabase
-      .from('notes')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('updated_at', { ascending: false })
-    
-    if (notes) {
-      set({ notes, isLoading: false })
-    } else {
+    try {
+      const { data: notes, error } = await supabase
+        .from('notes')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+      
+      if (error) throw error
+      
+      // Initialize blocks if they don't exist
+      const processedNotes = notes.map(note => ({
+        ...note,
+        blocks: note.blocks || [{
+          id: crypto.randomUUID(),
+          type: 'text' as const,
+          content: note.content || ''
+        }]
+      }))
+
+      set({ notes: processedNotes, isLoading: false })
+    } catch (error) {
       console.error('Error fetching notes:', error)
       set({ isLoading: false })
     }
@@ -62,28 +75,35 @@ export const useStore = create<NotesStore>((set, get) => ({
     const user = get().user
     if (!user) return
 
+    const initialBlock = {
+      id: crypto.randomUUID(),
+      type: 'text' as const,
+      content: ''
+    }
+
     const newNote = {
       user_id: user.id,
       title: 'Untitled',
-      blocks: [{
-        id: crypto.randomUUID(),
-        type: 'text' as const,
-        content: ''
-      }]
+      content: '',
+      blocks: [initialBlock]
     }
 
-    const { data: note, error } = await supabase
-      .from('notes')
-      .insert([newNote])
-      .select()
-      .single()
+    try {
+      const { data: note, error } = await supabase
+        .from('notes')
+        .insert([newNote])
+        .select()
+        .single()
 
-    if (note) {
-      set((state) => ({
-        notes: [note, ...state.notes],
-        activeNoteId: note.id
-      }))
-    } else {
+      if (error) throw error
+
+      if (note) {
+        set((state) => ({
+          notes: [{ ...note, blocks: [initialBlock] }, ...state.notes],
+          activeNoteId: note.id
+        }))
+      }
+    } catch (error) {
       console.error('Error creating note:', error)
     }
   },
@@ -92,21 +112,29 @@ export const useStore = create<NotesStore>((set, get) => ({
     const user = get().user
     if (!user) return
 
-    const { data: note, error } = await supabase
-      .from('notes')
-      .update(updates)
-      .eq('id', noteId)
-      .eq('user_id', user.id)
-      .select()
-      .single()
+    try {
+      const { data: note, error } = await supabase
+        .from('notes')
+        .update({
+          ...updates,
+          content: updates.blocks ? updates.blocks[0]?.content || '' : undefined,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', noteId)
+        .eq('user_id', user.id)
+        .select()
+        .single()
 
-    if (note) {
-      set((state) => ({
-        notes: state.notes.map((n) =>
-          n.id === noteId ? note : n
-        )
-      }))
-    } else {
+      if (error) throw error
+
+      if (note) {
+        set((state) => ({
+          notes: state.notes.map((n) =>
+            n.id === noteId ? { ...note, blocks: updates.blocks || n.blocks } : n
+          )
+        }))
+      }
+    } catch (error) {
       console.error('Error updating note:', error)
     }
   },
@@ -122,21 +150,29 @@ export const useStore = create<NotesStore>((set, get) => ({
       block.id === blockId ? { ...block, content } : block
     )
 
-    const { data: updatedNote, error } = await supabase
-      .from('notes')
-      .update({ blocks: updatedBlocks })
-      .eq('id', noteId)
-      .eq('user_id', user.id)
-      .select()
-      .single()
+    try {
+      const { data: updatedNote, error } = await supabase
+        .from('notes')
+        .update({
+          blocks: updatedBlocks,
+          content: updatedBlocks[0]?.content || '',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', noteId)
+        .eq('user_id', user.id)
+        .select()
+        .single()
 
-    if (updatedNote) {
-      set((state) => ({
-        notes: state.notes.map((n) =>
-          n.id === noteId ? updatedNote : n
-        )
-      }))
-    } else {
+      if (error) throw error
+
+      if (updatedNote) {
+        set((state) => ({
+          notes: state.notes.map((n) =>
+            n.id === noteId ? { ...updatedNote, blocks: updatedBlocks } : n
+          )
+        }))
+      }
+    } catch (error) {
       console.error('Error updating block:', error)
     }
   },
@@ -144,7 +180,7 @@ export const useStore = create<NotesStore>((set, get) => ({
   setActiveNote: (noteId) => set({ activeNoteId: noteId })
 }))
 
-// Setup real-time subscription
+// Setup auth state listener
 supabase.auth.onAuthStateChange((event, session) => {
   const store = useStore.getState()
   store.setUser(session?.user ?? null)
