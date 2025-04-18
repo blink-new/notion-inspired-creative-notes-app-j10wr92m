@@ -2,7 +2,7 @@
 import { useStore, type Block } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { useEffect, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, FileText } from 'lucide-react'
 
 export function Editor() {
   const { notes, activeNoteId, updateNote, updateBlock, isLoading } = useStore()
@@ -25,8 +25,12 @@ export function Editor() {
 
   if (!activeNote) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground">
-        Select or create a note to start editing
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
+        <FileText className="h-12 w-12 text-muted-foreground/50" />
+        <div className="text-center">
+          <p className="text-lg font-medium">No note selected</p>
+          <p className="text-sm">Select or create a note to start editing</p>
+        </div>
       </div>
     )
   }
@@ -50,7 +54,7 @@ export function Editor() {
           className="text-4xl font-bold w-full bg-transparent border-none outline-none mb-8 focus:ring-2 focus:ring-ring rounded-md px-2 py-1 transition-all"
         />
         <div className="space-y-4">
-          {activeNote.blocks.map((block) => (
+          {Array.isArray(activeNote.blocks) && activeNote.blocks.map((block) => (
             <div key={block.id} className="group relative">
               <textarea
                 value={block.content}
