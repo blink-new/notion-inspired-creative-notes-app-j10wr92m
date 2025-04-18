@@ -63,7 +63,8 @@
     "zod": "^3.24.2",
     "@radix-ui/react-icons": "latest",
     "zustand": "latest",
-    "@supabase/supabase-js": "latest"
+    "@supabase/supabase-js": "latest",
+    "lodash-es": "latest"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
