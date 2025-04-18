@@ -1,6 +1,7 @@
 
 import { create } from 'zustand'
 import { supabase } from './supabase'
+import type { User } from '@supabase/supabase-js'
 
 export interface Block {
   id: string
@@ -10,6 +11,7 @@ export interface Block {
 
 export interface Note {
   id: string
+  user_id: string
   title: string
   blocks: Block[]
   created_at: string
@@ -20,6 +22,8 @@ interface NotesStore {
   notes: Note[]
   activeNoteId: string | null
   isLoading: boolean
+  user: User | null
+  setUser: (user: User | null) => void
   addNote: () => Promise<void>
   updateNote: (noteId: string, updates: Partial<Note>) => Promise<void>
   updateBlock: (noteId: string, blockId: string, content: string) => Promise<void>
@@ -31,30 +35,44 @@ export const useStore = create<NotesStore>((set, get) => ({
   notes: [],
   activeNoteId: null,
   isLoading: false,
+  user: null,
+
+  setUser: (user) => set({ user }),
 
   fetchNotes: async () => {
+    const user = get().user
+    if (!user) return
+
     set({ isLoading: true })
-    const { data: notes } = await supabase
+    const { data: notes, error } = await supabase
       .from('notes')
       .select('*')
+      .eq('user_id', user.id)
       .order('updated_at', { ascending: false })
     
     if (notes) {
       set({ notes, isLoading: false })
+    } else {
+      console.error('Error fetching notes:', error)
+      set({ isLoading: false })
     }
   },
 
   addNote: async () => {
+    const user = get().user
+    if (!user) return
+
     const newNote = {
+      user_id: user.id,
       title: 'Untitled',
       blocks: [{
         id: crypto.randomUUID(),
-        type: 'text',
+        type: 'text' as const,
         content: ''
       }]
     }
 
-    const { data: note } = await supabase
+    const { data: note, error } = await supabase
       .from('notes')
       .insert([newNote])
       .select()
@@ -65,14 +83,20 @@ export const useStore = create<NotesStore>((set, get) => ({
         notes: [note, ...state.notes],
         activeNoteId: note.id
       }))
+    } else {
+      console.error('Error creating note:', error)
     }
   },
 
   updateNote: async (noteId, updates) => {
-    const { data: note } = await supabase
+    const user = get().user
+    if (!user) return
+
+    const { data: note, error } = await supabase
       .from('notes')
       .update(updates)
       .eq('id', noteId)
+      .eq('user_id', user.id)
       .select()
       .single()
 
@@ -82,10 +106,15 @@ export const useStore = create<NotesStore>((set, get) => ({
           n.id === noteId ? note : n
         )
       }))
+    } else {
+      console.error('Error updating note:', error)
     }
   },
 
   updateBlock: async (noteId, blockId, content) => {
+    const user = get().user
+    if (!user) return
+
     const note = get().notes.find((n) => n.id === noteId)
     if (!note) return
 
@@ -93,10 +122,11 @@ export const useStore = create<NotesStore>((set, get) => ({
       block.id === blockId ? { ...block, content } : block
     )
 
-    const { data: updatedNote } = await supabase
+    const { data: updatedNote, error } = await supabase
       .from('notes')
       .update({ blocks: updatedBlocks })
       .eq('id', noteId)
+      .eq('user_id', user.id)
       .select()
       .single()
 
@@ -106,6 +136,8 @@ export const useStore = create<NotesStore>((set, get) => ({
           n.id === noteId ? updatedNote : n
         )
       }))
+    } else {
+      console.error('Error updating block:', error)
     }
   },
 
@@ -113,6 +145,19 @@ export const useStore = create<NotesStore>((set, get) => ({
 }))
 
 // Setup real-time subscription
+supabase.auth.onAuthStateChange((event, session) => {
+  const store = useStore.getState()
+  store.setUser(session?.user ?? null)
+  
+  if (session?.user) {
+    store.fetchNotes()
+  } else {
+    store.setActiveNote(null)
+    useStore.setState({ notes: [] })
+  }
+})
+
+// Setup real-time subscription for notes
 supabase
   .channel('notes')
   .on('postgres_changes', { 
@@ -121,19 +166,12 @@ supabase
     table: 'notes' 
   }, (payload) => {
     const store = useStore.getState()
+    const user = store.user
     
-    if (payload.eventType === 'INSERT') {
-      const note = payload.new as Note
-      store.fetchNotes()
-    }
+    if (!user) return
     
-    if (payload.eventType === 'UPDATE') {
-      const note = payload.new as Note
-      store.fetchNotes()
-    }
-    
-    if (payload.eventType === 'DELETE') {
-      const oldNote = payload.old as Note
+    // Only update if the change is for the current user's notes
+    if (payload.new && (payload.new as Note).user_id === user.id) {
       store.fetchNotes()
     }
   })
