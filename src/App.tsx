@@ -1,9 +1,14 @@
-import { useState } from 'react'
+
+import { Sidebar } from './components/Sidebar'
+import { Editor } from './components/Editor'
 
 function App() {
   return (
-    <div></div>
+    <div className="flex h-screen bg-background text-foreground">
+      <Sidebar />
+      <Editor />
+    </div>
   )
 }
 
-export default App 
+export default App
